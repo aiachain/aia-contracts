@@ -15,6 +15,7 @@ import "./mock/MockVotePool.sol";
 import "./library/SortedList.sol";
 import "./interfaces/IVotePool.sol";
 import "./interfaces/IValidators.sol";
+import "./interfaces/IReward.sol";
 import "./library/SafeSend.sol";
 
 contract Validators is Params, SafeSend, IValidators {
@@ -46,12 +47,27 @@ contract Validators is Params, SafeSend, IValidators {
     uint public burnRate;
     uint public foundationRate;
 
+    uint public poaMinMargin ;
+    uint public posMinMargin ;
+    uint public punishAmount ;
+    
+    uint blockReward;
+    IReward public constant rewardContract = IReward(0x000000000000000000000000000000000000F00a);
+
+    uint public marginBurnRate;
+    uint public marginBurnPeriod;
+
     event ChangeAdmin(address indexed admin);
     event UpdateParams(uint8 posCount, uint8 posBackup, uint8 poaCount, uint8 poaBackup);
     event AddValidator(address indexed validator, address votePool);
     event UpdateRates(uint burnRate, uint foundationRate);
     event UpdateFoundationAddress(address foundation);
     event WithdrawFoundationReward(address receiver, uint amount);
+    event UpdatePoaMinMargin(uint margin);
+    event UpdatePosMinMargin(uint margin);
+    event UpdatePunishAmount(uint margin);
+    event UpdateMarginBurnRate(uint burnRate);
+    event UpdateMarginBurnPeriod(uint period);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Only admin");
@@ -142,6 +158,90 @@ contract Validators is Params, SafeSend, IValidators {
     onlyAdmin {
         foundation = _foundation;
         emit UpdateFoundationAddress(_foundation);
+    }
+
+    function updatePoaMinMargin(uint _margin)
+    external
+    onlyAdmin {
+        poaMinMargin = _margin;
+        emit UpdatePoaMinMargin(_margin);
+    }
+
+    function updatePosMinMargin(uint _margin)
+    external
+    onlyAdmin {
+        posMinMargin = _margin;
+        emit UpdatePosMinMargin(_margin);
+    }
+
+    function updatePunishAmount(uint _amount)
+    external
+    onlyAdmin {
+        punishAmount = _amount;
+        emit UpdatePunishAmount(_amount);
+    }
+
+    function updateMarginBurnRate(uint _rate)
+    external
+    onlyAdmin {
+        require(_rate <= PERCENT_BASE, "Invalid rates");
+        marginBurnRate = _rate;
+        emit UpdateMarginBurnRate(_rate);
+    }
+
+    function updateMarginBurnPeriod(uint _period)
+    external
+    onlyAdmin {
+        marginBurnPeriod = _period;
+        emit UpdateMarginBurnPeriod(_period);
+    }
+
+    function getPoaMinMargin()
+    override
+    external 
+    view 
+    returns (uint) {
+        return poaMinMargin;
+    }
+
+    function getPosMinMargin()
+    override
+    external 
+    view 
+    returns (uint) {
+        return posMinMargin;
+    }
+
+    function getPunishAmount()
+    override
+    external 
+    view 
+    returns (uint) {
+        return punishAmount;
+    }
+
+    function getMarginBurnRate()
+    override
+    external 
+    view 
+    returns (uint) {
+        return marginBurnRate;
+    }
+
+    function getMarginBurnPeriod()
+    override
+    external 
+    view 
+    returns (uint) {
+        return marginBurnPeriod;
+    }
+
+    function getBurnReceiver()
+    override
+    external 
+    view 
+    returns (address payable) {
+        return burnReceiver;
     }
 
     function withdrawFoundationReward()
@@ -273,6 +373,14 @@ contract Validators is Params, SafeSend, IValidators {
         return allValidators.length;
     }
 
+    function receiveBlockReward()
+    override
+    external
+    payable {
+        require(msg.sender == address(rewardContract), "Reward contract only");
+        blockReward = msg.value;
+    }
+
     function distributeBlockReward()
     external
     payable
@@ -284,13 +392,19 @@ contract Validators is Params, SafeSend, IValidators {
     {
         operationsDone[block.number][Operation.Distribute] = true;
 
+        rewardContract.withdrawReward();
+
         uint burnVal = msg.value.mul(burnRate).div(PERCENT_BASE);
         sendValue(burnReceiver, burnVal);
 
         uint foundationVal = msg.value.mul(foundationRate).div(PERCENT_BASE);
         foundationReward = foundationReward.add(foundationVal);
 
-        uint _left = msg.value.add(rewardLeft).sub(burnVal).sub(foundationVal);
+        uint _left = msg.value.add(rewardLeft).add(blockReward).sub(burnVal).sub(foundationVal);
+        blockReward = 0;
+        if (_left == 0) { 
+            return;
+        }
 
         // 10% to backups; 40% to validators according to votes; 50% is divided equally among validators
         uint _firstPart = _left.mul(10).div(100);

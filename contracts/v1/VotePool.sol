@@ -47,6 +47,8 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
 
     uint public exitBlk;
 
+    uint public readyBlk;
+
     struct VoterInfo {
         uint amount;
         uint rewardDebt;
@@ -86,14 +88,15 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
     event ChangeState(State indexed state);
     event Exit(address indexed validator);
     event WithdrawMargin(address indexed sender, uint amount);
-    event  ExitVote(address indexed sender, uint amount);
+    event ExitVote(address indexed sender, uint amount);
     event WithdrawValidatorReward(address indexed sender, uint amount);
     event WithdrawVoteReward(address indexed sender, uint amount);
     event Deposit(address indexed sender, uint amount);
     event Withdraw(address indexed sender, uint amount);
     event Punish(address indexed validator, uint amount);
     event RemoveIncoming(address indexed validator, uint amount);
-
+    event RemoveMargin(address indexed validator, uint amount);
+    event AddMarginToReady(uint block);
 
     constructor(address _validator, address _manager, uint _percent, ValidatorType _type, State _state)
     public
@@ -172,9 +175,9 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
 
         uint minMargin;
         if (validatorType == ValidatorType.Poa) {
-            minMargin = PoaMinMargin;
+            minMargin = validatorsContract.getPoaMinMargin();
         } else {
-            minMargin = PosMinMargin;
+            minMargin = validatorsContract.getPosMinMargin();
         }
 
         if (margin >= minMargin) {
@@ -182,7 +185,9 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
             punishContract.cleanPunishRecord(validator);
             validatorsContract.improveRanking();
 
+            readyBlk = block.number;
             emit ChangeState(state);
+            emit AddMarginToReady(readyBlk);
         }
     }
 
@@ -218,10 +223,11 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
         }
         validatorsContract.removeRanking();
 
-        uint _punishAmount = margin >= PunishAmount ? PunishAmount : margin;
+        uint _p = validatorsContract.getPunishAmount();
+        uint _punishAmount = margin >= _p ? _p : margin;
         if (_punishAmount > 0) {
             margin = margin.sub(_punishAmount);
-            sendValue(address(0), _punishAmount);
+            sendValue(validatorsContract.getBurnReceiver(), _punishAmount);
             emit Punish(validator, _punishAmount);
         }
 
@@ -234,11 +240,12 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
     onlyPunishContract {
         validatorsContract.withdrawReward();
 
-        uint _incoming = validatorReward < PunishAmount ? validatorReward : PunishAmount;
+        uint _p = validatorsContract.getPunishAmount();
+        uint _incoming = validatorReward < _p ? validatorReward : _p;
 
         validatorReward = validatorReward.sub(_incoming);
         if (_incoming > 0) {
-            sendValue(address(0), _incoming);
+            sendValue(validatorsContract.getBurnReceiver(), _incoming);
             emit RemoveIncoming(validator, _incoming);
         }
     }
@@ -268,7 +275,14 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
 
         exitBlk = 0;
 
-        uint _amount = margin;
+        uint burnMargin = 0;
+        if (block.number.sub(readyBlk) < validatorsContract.getMarginBurnPeriod()) {
+            burnMargin = margin.mul(validatorsContract.getMarginBurnRate()).div(PERCENT_BASE);
+            sendValue(validatorsContract.getBurnReceiver(), burnMargin);
+            emit RemoveMargin(validator, burnMargin);
+        }
+        
+        uint _amount = margin.sub(burnMargin);
         margin = 0;
         sendValue(msg.sender, _amount);
         emit WithdrawMargin(msg.sender, _amount);
@@ -386,5 +400,15 @@ contract VotePool is Params, ReentrancyGuard, SafeSend, IVotePool {
 
         sendValue(msg.sender, _amount);
         emit Withdraw(msg.sender, _amount);
+    }
+
+    function getPendingMargin() external view returns (uint) {
+        uint burnMargin = 0;
+        if (block.number.sub(readyBlk) < validatorsContract.getMarginBurnPeriod()) {
+            burnMargin = margin.mul(validatorsContract.getMarginBurnRate()).div(PERCENT_BASE);
+        }
+        
+        uint _amount = margin.sub(burnMargin);
+        return _amount;
     }
 }

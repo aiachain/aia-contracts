@@ -14,6 +14,21 @@ interface IValidators {
     function withdrawReward() external;
 
     function votePools(address validator) external view returns (IVotePool);
+
+    function getPoaMinMargin() external view returns (uint);
+
+    function getPosMinMargin() external view returns (uint);
+
+    function getPunishAmount() external view returns (uint);
+
+    function receiveBlockReward() external payable;
+
+    function getMarginBurnRate() external view returns (uint);
+
+    function getMarginBurnPeriod() external view returns (uint);
+
+    function getBurnReceiver() external view returns (address payable);
+
 }
 
     enum Operation {Distribute, UpdateValidators}
