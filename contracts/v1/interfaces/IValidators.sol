@@ -21,7 +21,7 @@ interface IValidators {
 
     function getPunishAmount() external view returns (uint);
 
-    function receiveBlockReward() external payable;
+    function receiveBlockReward(uint) external payable;
 
     function getMarginBurnRate() external view returns (uint);
 
@@ -29,6 +29,7 @@ interface IValidators {
 
     function getBurnReceiver() external view returns (address payable);
 
+    function getFoundationRate() external view returns (uint);
 }
 
     enum Operation {Distribute, UpdateValidators}

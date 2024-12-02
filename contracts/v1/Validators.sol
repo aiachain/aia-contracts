@@ -130,9 +130,6 @@ contract Validators is Params, SafeSend, IValidators {
     function updateParams(uint8 _posCount, uint8 _posBackup, uint8 _poaCount, uint8 _poaBackup)
     external
     onlyAdmin {
-        require(_posCount + _poaCount == MaxValidators, "Invalid counts");
-        require(_posBackup <= _posCount && _poaBackup <= _poaCount, "Invalid backup counts");
-
         count[ValidatorType.Pos] = _posCount;
         count[ValidatorType.Poa] = _poaCount;
 
@@ -242,6 +239,14 @@ contract Validators is Params, SafeSend, IValidators {
     view 
     returns (address payable) {
         return burnReceiver;
+    }
+
+    function getFoundationRate()
+    override
+    external 
+    view 
+    returns (uint) {
+        return foundationRate;
     }
 
     function withdrawFoundationReward()
@@ -373,12 +378,17 @@ contract Validators is Params, SafeSend, IValidators {
         return allValidators.length;
     }
 
-    function receiveBlockReward()
+    function receiveBlockReward(uint foundationVal)
     override
     external
     payable {
         require(msg.sender == address(rewardContract), "Reward contract only");
-        blockReward = msg.value;
+        if (foundationVal <= msg.value) {
+            foundationReward = foundationReward.add(foundationVal);
+            blockReward = msg.value.sub(foundationVal);
+        } else {
+            blockReward = msg.value;
+        }
     }
 
     function distributeBlockReward()
@@ -397,10 +407,7 @@ contract Validators is Params, SafeSend, IValidators {
         uint burnVal = msg.value.mul(burnRate).div(PERCENT_BASE);
         sendValue(burnReceiver, burnVal);
 
-        uint foundationVal = msg.value.mul(foundationRate).div(PERCENT_BASE);
-        foundationReward = foundationReward.add(foundationVal);
-
-        uint _left = msg.value.add(rewardLeft).add(blockReward).sub(burnVal).sub(foundationVal);
+        uint _left = msg.value.add(rewardLeft).add(blockReward).sub(burnVal);
         blockReward = 0;
         if (_left == 0) { 
             return;

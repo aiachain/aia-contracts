@@ -148,11 +148,18 @@ contract Reward is Params, SafeSend {
         }
         sendValue(validatorsContract.getBurnReceiver(), burnVal);
 
+        uint foundationRate = validatorsContract.getFoundationRate();
+        if (curretBurnRate + foundationRate > PERCENT_BASE) {
+            foundationRate = PERCENT_BASE.sub(curretBurnRate);
+        }
+
+        uint foundationVal = reward.mul(foundationRate).div(PERCENT_BASE);
+
         uint _amount = reward.sub(burnVal);
         if (_amount > address(this).balance) {
             return;
         }
-        validatorsContract.receiveBlockReward{value : _amount}();
+        validatorsContract.receiveBlockReward{value : _amount}(foundationVal);
     }
 
     receive() external payable {}
